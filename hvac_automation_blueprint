@@ -1,0 +1,190 @@
+blueprint:
+    name: Lower temperature when a window opens or nobody home
+    description: Lower the HVAC temperature when a window opens. Restart the previous temperature when it closes.
+    domain: automation
+    input:
+        window_entity:
+            name: Window Sensor
+            description: The window sensor that controls the climate entity. If you have more window sensors please make a group sensor.
+            selector:
+                entity:
+                    domain: binary_sensor
+                    multiple: false
+        climate_target:
+            description: The climate entity that is controlled by the window sensor
+            name: Climate Device
+            selector:
+                entity:
+                    domain: climate
+                    multiple: false
+        minimum_open_time:
+            description: Time in seconds to wait until the automation is triggered
+            name: Minimum open time
+            default: 10
+            selector:
+                number:
+                    min: 0.0
+                    max: 59.0
+                    unit_of_measurement: seconds
+                    step: 1.0
+                    mode: slider
+        off_temperature:
+            description: Temperature to set when the window is open
+            name: Open window temperature
+            selector:
+                entity:
+                    domain: input_number
+        scene_id:
+            name: Scene name to store the initial climate state
+            selector:
+                text:
+                    multiline: false
+        zone:
+            name: Zone to be monitored
+            selector:
+                entity:
+                    domain: zone
+                    multiple: false
+        scheduler:
+            name: 'Scheduler'
+            description: 'Scheduler that specifies when the comfort temperature can be set.'
+            selector:
+                entity:
+                    domain: schedule
+                    multiple: false
+mode: single
+variables:
+    scene_id: !input scene_id
+    off_temperature: !input off_temperature
+    climate_temperature: !input climate_target
+trigger:
+  - platform: numeric_state
+    entity_id: !input zone
+    above: 0
+  - platform: numeric_state
+    entity_id: !input zone
+    below: 1
+  - platform: state
+    entity_id: !input window_entity
+    to: "on"
+    for: !input minimum_open_time
+  - platform: state
+    entity_id: !input window_entity
+    to: "off"
+  - platform: state
+    entity_id: !input scheduler
+action:
+  - choose:
+      - conditions:
+          - condition: and
+            conditions:
+              - condition: numeric_state
+                entity_id: !input zone
+                above: 0
+              - condition: state
+                entity_id: !input window_entity
+                state: "off"
+              - condition: state
+                entity_id: !input scheduler
+                state: "on"
+        sequence:
+          - service: scene.turn_on
+            target:
+              entity_id: "scene.{{ scene_id }}"
+      - conditions:
+          - condition: and
+            conditions:
+              - condition: numeric_state
+                entity_id: !input zone
+                below: 1
+              - condition: state
+                entity_id: !input window_entity
+                state: "off"
+              - condition: state
+                entity_id: !input scheduler
+                state: "on"
+              - condition: template
+                value_template: >-
+                  {{ states(off_temperature) !=
+                  state_attr(climate_temperature,'temperature') }}
+        sequence:
+          - service: scene.create
+            data:
+              scene_id: !input scene_id
+              snapshot_entities: !input climate_target
+          - service: climate.set_temperature
+            data:
+              temperature: "{{ states(off_temperature) | float }}"
+            target:
+              entity_id: !input climate_target
+      - conditions:
+          - condition: and
+            conditions:
+              - condition: state
+                entity_id: !input window_entity
+                state: "on"
+                for: !input minimum_open_time
+              - condition: numeric_state
+                entity_id: !input zone
+                above: 0
+              - condition: state
+                entity_id: !input scheduler
+                state: "on"
+              - condition: template
+                value_template: >-
+                  {{ states(off_temperature) !=
+                  state_attr(climate_temperature,'temperature') }}
+        sequence:
+          - service: scene.create
+            data:
+              scene_id: !input scene_id
+              snapshot_entities: !input climate_target
+          - service: climate.set_temperature
+            data:
+              temperature: "{{ states(off_temperature) | float }}"
+            target:
+              entity_id: !input climate_target
+      - conditions:
+          - condition: and
+            conditions:
+              - condition: numeric_state
+                entity_id: !input zone
+                above: 0
+              - condition: state
+                entity_id: !input window_entity
+                state: "off"
+              - condition: state
+                entity_id: !input scheduler
+                state: "off"
+              - condition: template
+                value_template: >-
+                  {{ states(off_temperature) !=
+                  state_attr(climate_temperature,'temperature') }}
+        sequence:
+          - service: scene.create
+            data:
+              scene_id: !input scene_id
+              snapshot_entities: !input climate_target
+          - service: climate.set_temperature
+            data:
+              temperature: "{{ states(off_temperature) | float }}"
+            target:
+              entity_id: !input climate_target
+          
+    default:
+      - if:
+          - condition: template
+            value_template: >-
+              {{ states(off_temperature) !=
+              state_attr(climate_temperature,'temperature') }}
+        then:
+          - service: scene.create
+            data:
+              scene_id: !input scene_id
+              snapshot_entities: !input climate_target
+          - service: climate.set_temperature
+            data:
+              temperature: "{{ states(off_temperature) | float }}"
+            target:
+              entity_id: !input climate_target
+          
